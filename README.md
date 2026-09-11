@@ -28,6 +28,17 @@ make check-all XOLO_REF=main           # build strict des trois langues
 make help                              # toutes les cibles
 ```
 
+## Liens hors documentation
+
+Les pages de Xolo renvoient aux fichiers de la racine du dépôt (`LICENSE.md`,
+`GOVERNANCE.md`, `SECURITY.md`...) par des chemins relatifs : valides sur
+GitHub, introuvables sur le site. `scripts/rewrite-repo-links.py`, appelé par
+`scripts/prepare-source.sh`, transforme toute cible qui sort de `docs/<lang>`
+en URL absolue vers le dépôt source, à la référence préparée
+(`.../blob/vX.Y.Z/GOVERNANCE.md`) : la doc publiée pointe alors vers les
+fichiers de sa propre version, et le build strict ne signale plus de page
+manquante.
+
 ## Ce qui est publié
 
 | URL | Contenu |

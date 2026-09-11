@@ -54,6 +54,12 @@ for lang in "${languages[@]}"; do
   # Logo versionné par langue, réécrasé à chaque prepare pour suivre les
   # évolutions éventuelles du fichier source.
   cp -a "${logo_src}" "${content_dir}/${lang}/logo.svg"
+  # Les pages renvoient aux fichiers de la racine du dépôt Xolo (LICENSE.md,
+  # GOVERNANCE.md...), absents du site : ces liens deviennent des URLs GitHub.
+  "${root_dir}/scripts/rewrite-repo-links.py" \
+    "${content_dir}/${lang}" \
+    "${repository}" \
+    "${ref}"
   prepared+=("${lang}")
 done
 
