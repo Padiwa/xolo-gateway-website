@@ -13,6 +13,9 @@ export PATH := $(BIN_DIR):$(PATH)
 
 XOLO_REPOSITORY ?= https://github.com/xolo-gateway/xolo.git
 XOLO_REF ?= main
+# Checkout local de Xolo à utiliser à la place du clone (voir
+# scripts/prepare-source.sh).
+XOLO_SOURCE ?=
 
 # Fiches d'experts : dépôt privé xolo-gateway/org, lu avec EXPERTS_TOKEN.
 # EXPERTS_SOURCE court-circuite le clone et pointe un dossier local, ce qui
@@ -103,6 +106,7 @@ prepare: prepare-source prepare-experts
 prepare-source:
 	XOLO_REPOSITORY="$(XOLO_REPOSITORY)" \
 	XOLO_REF="$(XOLO_REF)" \
+	XOLO_SOURCE="$(XOLO_SOURCE)" \
 		./scripts/prepare-source.sh
 
 .PHONY: prepare-experts

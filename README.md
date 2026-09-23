@@ -25,6 +25,8 @@ make tools-sync                        # installe Zensical et Mike dans tools/.v
 make preview XOLO_REF=main             # sert le français de xolo@main
 make preview DOC_LANG=en XOLO_REF=main
 make check-all XOLO_REF=main           # build strict des trois langues
+make prepare-source check-all XOLO_SOURCE=../xolo XOLO_REF=main
+                                       # idem depuis un checkout local de Xolo
 make help                              # toutes les cibles
 ```
 
