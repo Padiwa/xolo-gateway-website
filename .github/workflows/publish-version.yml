@@ -142,6 +142,11 @@ jobs:
       - name: Validate documentation (fr, en, es)
         run: make check-all
 
+      # Pose llms.txt à la racine de chaque site/<lang>/ construit par
+      # check-all, pour qu'il soit publié avec le reste.
+      - name: Copy llms.txt into built sites
+        run: make copy-llms-txt
+
       - name: Configure Git identity
         run: |
           git config user.name "xolo-docs-bot"

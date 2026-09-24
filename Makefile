@@ -63,6 +63,7 @@ help:
 		"  make build DOC_LANG=...             Construit une langue" \
 		"  make check DOC_LANG=...             Construit une langue en mode strict" \
 		"  make check-all                  Construit les 3 langues en mode strict" \
+		"  make copy-llms-txt              Copie overrides/llms/<lang>/llms.txt vers site/<lang>/" \
 		"  make serve DOC_LANG=...             Lance le serveur local pour une langue" \
 		"  make preview DOC_LANG=... XOLO_REF=...  Prépare et sert une langue" \
 		"  make publish DOC_LANG=... VERSION=...   Publie une langue avec Mike" \
@@ -132,8 +133,20 @@ check-all: tools
 		"$(ZENSICAL)" build --clean --strict --config-file "zensical.$$lang.toml" || exit 1; \
 	done
 
+# Pose les fichiers llms.txt à la racine de chaque build Zensical
+# (site/<lang>/llms.txt). Les sources vivent dans overrides/llms/, versionnées
+# dans ce dépôt, contrairement aux pages de contenu (qui viennent de
+# xolo-gateway/xolo). Le script ne fait pas échouer le build quand un fichier
+# manque : on préfère publier sans llms.txt pour cette langue plutôt que de
+# bloquer un déploiement.
+.PHONY: copy-llms-txt
+copy-llms-txt:
+	./scripts/copy-llms-txt.sh
+
 # La page des experts est régénérée à chaque démarrage : elle vient d'un autre
-# dépôt, Zensical ne sait pas la reconstruire tout seul.
+# dépôt, Zensical ne sait pas la reconstruire tout seul. llms.txt est copié
+# aussi : Zensical ne sert que les fichiers présents dans le docs_dir, et
+# llms.txt vit dans overrides/, pas dans content/.
 .PHONY: serve
 serve: tools prepare-experts
 	"$(ZENSICAL)" serve --config-file "$(CONFIG)"
@@ -141,6 +154,10 @@ serve: tools prepare-experts
 .PHONY: preview
 preview: prepare-source serve
 
+# La publication pousse site/<lang>/ entier via mike deploy : il faut que
+# llms.txt y soit déjà, sinon la page publiée est sans llms.txt. La
+# dépendance le garantit pour publish et ses dérivés (publish-all,
+# publish-latest, alias, set-default, set-default-all).
 .PHONY: require-version
 require-version:
 	@test -n "$(VERSION)" || { \
@@ -149,7 +166,7 @@ require-version:
 	}
 
 .PHONY: publish
-publish: require-version tools
+publish: require-version tools copy-llms-txt
 	@args=(--deploy-prefix "$(DEPLOY_PREFIX)"); \
 	if [[ "$(PUSH)" == "true" ]]; then \
 		args+=(--push); \
@@ -171,7 +188,7 @@ publish-latest: ALIASES=latest
 publish-latest: publish
 
 .PHONY: alias
-alias: require-version tools
+alias: require-version tools copy-llms-txt
 	@test -n "$(ALIASES)" || { echo "ALIASES est obligatoire"; exit 1; }; \
 	args=(--deploy-prefix "$(DEPLOY_PREFIX)" --update-aliases --alias-type="$(ALIAS_TYPE)" --template "$(REDIRECT_TEMPLATE)"); \
 	if [[ "$(PUSH)" == "true" ]]; then \
@@ -180,7 +197,7 @@ alias: require-version tools
 	"$(MIKE)" alias --config-file "$(CONFIG)" "$${args[@]}" "$(VERSION)" $(ALIASES)
 
 .PHONY: set-default
-set-default: tools
+set-default: tools copy-llms-txt
 	@args=(--deploy-prefix "$(DEPLOY_PREFIX)" --template "$(REDIRECT_TEMPLATE)"); \
 	if [[ "$(PUSH)" == "true" ]]; then \
 		args+=(--push); \

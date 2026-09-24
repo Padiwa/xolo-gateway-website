@@ -1,0 +1,111 @@
+# Xolo
+
+> Passerelle LLM souveraine : Xolo s'intercale entre vos applications et les fournisseurs de modèles de langage. Il tient les clés d'API, les budgets et le routage entre modèles, et garde une trace de chaque requête. Binaire Go unique, distribué sous AGPL-3.0, sans service tiers.
+>
+> **Souveraineté** = exécutable on-prem, données et journaux restent dans l'organisation, licence libre (AGPL-3.0), aucun compte ni service tiers requis. Xolo n'envoie rien à un fournisseur que l'administrateur n'a pas explicitement configuré.
+>
+> Cette documentation couvre Xolo `xolo-server`, l'interface web d'administration, le proxy LLM OpenAI-compatible (route `/v1/chat/completions` et l'API OpenAI standard) et le SDK de plugins (`pkg/pluginsdk`, Apache-2.0). Les pages pointées ci-dessous sont publiées à l'URL `/latest/` ; les URL absolues ne changent pas d'une version à l'autre (`/latest/`, `/main/`, `/X.Y.Z/` sont interchangeables). Les applications clientes utilisent n'importe quel SDK OpenAI (Python, Node, curl…) en remplaçant l'URL de base par celle de Xolo et la clé d'API par une clé d'application Xolo.
+
+Vocabulaire à connaître avant de parcourir les pages :
+
+- **Organisation** : entité centrale qui regroupe membres, budgets, fournisseurs et middlewares. Un utilisateur peut appartenir à plusieurs organisations.
+- **Fournisseur** : connexion vers un service LLM externe (OpenAI, Mistral, OpenRouter, Ollama, vLLM…). Porte la clé d'API et le mode de facturation.
+- **Modèle** : configuration d'un modèle précis avec ses coûts, son contexte, ses capacités (outils, vision, raisonnement).
+- **Modèle virtuel** : modèle personnalisé exposé comme un modèle classique, mais qui applique un pipeline de nœuds avant et après l'appel réel. L'utilisateur ne voit pas le pipeline.
+- **Middleware** : pipeline attaché à un ou plusieurs modèles existants, qui s'exécute en plus du modèle sous-jacent. Plusieurs middlewares se chaînent par priorité croissante.
+- **Pipeline** : graphe de nœuds reliés par des ports typés (`request`, `response`, `string`, `number`, `boolean`). Les nœuds sont soit intégrés au serveur, soit fournis par des plugins.
+- **Événement** : entrée journalisée pour chaque requête proxy, chaque action de configuration et chaque signal émis par un plugin. Interrogeable avec `eventql`.
+- **eventql** : langage de requête de l'explorateur d'événements et des règles d'alerte, inspiré de LogQL (sélecteur d'étiquettes + pipeline de filtres).
+- **Budget** : plafond de consommation à l'échelle d'un membre ou d'une organisation. Bloque les requêtes suivantes quand il est atteint.
+- **Plugin** : binaire séparé chargé au démarrage depuis `XOLO_PLUGINS_DIR`, qui dialogue avec le serveur via l'interface gRPC de `pkg/pluginsdk`.
+- **Application** : configuration machine-à-machine (M2M) qui permet à un service externe de consommer Xolo avec un jeton dédié et un jeu de rôles restreint.
+- **Tenant** : frontière d'isolation la plus externe, au-dessus de l'organisation. Invisible par défaut (tenant unique `default`) ; n'apparaît qu'en mode multi-tenant.
+
+Conventions de cette documentation :
+
+- Le français est publié sans préfixe (`/latest/...`), l'anglais sous `/en/latest/...`, l'espagnol sous `/es/latest/...`.
+- Les captures d'écran et illustrations sont dans le même dossier que la page qui les décrit.
+- Les variables d'environnement sont préfixées `XOLO_` (par exemple `XOLO_SECRET_KEY`, `XOLO_HTTP_BASE_URL`).
+- L'API de provisioning (port 3003) est strictement séparée de l'API web (port 3002) : TLS mutuel, pas d'OIDC, portée instance.
+- Les codes d'erreur HTTP sont documentés : `400 invalid_request`, `401 unauthorized`, `404 not_found`, `409 conflict`, `422 unprocessable`, `500 internal_error`.
+
+## Concepts
+
+- [API OpenAI-compatible](https://xolo-gateway.org/latest/administration/installation/): Xolo expose l'API OpenAI standard (`/v1/chat/completions`, `/v1/models`, etc.). Les clients existants (SDK Python `openai`, Node, curl, agents LangChain…) fonctionnent en remplaçant `base_url` par l'URL de Xolo et la clé par un jeton d'application Xolo ; aucune modification du code client n'est nécessaire pour basculer d'OpenAI à un modèle hébergé.
+- [Organisation, rôles et permissions](https://xolo-gateway.org/latest/concepts/organisation-et-permissions/): modèle d'organisation, tenant, rôles intégrés (`owner`, `admin`, `member`), rôles personnalisés, schéma `<ressource>:<action>`, règle implicite lecture/écriture.
+- [Fournisseurs, modèles et pipelines](https://xolo-gateway.org/latest/concepts/fournisseurs-modeles-pipeline/): articulation entre fournisseur, modèle, modèle virtuel, middleware et plugin ; tableau des plugins livrés et de leur rôle.
+- [Nœuds de pipeline : intégrés et plugins](https://xolo-gateway.org/latest/concepts/noeuds-pipeline/): chaque nœud du serveur (`generator`, `sink`, `model`, `model_ref`, `model_fallback`, `value`, `compare`, `select`, `math`, `sample`, `context`, `trace`, `block`, `note`) et chaque plugin par défaut, avec leurs ports typés.
+- [Nœuds intégrés en détail](https://xolo-gateway.org/latest/concepts/noeuds-pipeline/noeuds-integres/): description complète de chaque nœud intégré (rôle, ports, configuration).
+- [Budgets et quotas](https://xolo-gateway.org/latest/concepts/budgets-et-quotas/): hiérarchie des budgets, calcul effectif de la part consommée, partage équitable.
+- [Estimation énergétique et carbone](https://xolo-gateway.org/latest/concepts/estimation-energetique/): méthodologie employée pour estimer l'énergie et le CO₂ d'une inférence, niveaux d'infrastructure (Hyperscaler, Major Cloud, Small Provider).
+- [Syntaxe eventql](https://xolo-gateway.org/latest/concepts/eventql/): grammaire complète, sélecteur d'étiquettes (`type`, `source`, `severity`, `org`, `user`), filtres d'attributs et de ligne, échappements, expressions régulières RE2, catalogue des événements émis par la plateforme et par les plugins.
+
+## Administration
+
+- [Installation & déploiement](https://xolo-gateway.org/latest/administration/installation/): prérequis (`XOLO_SECRET_KEY`), image Docker `ghcr.io/xolo-gateway/xolo-server`, build depuis les sources, premier démarrage et `XOLO_HTTP_AUTHN_DEFAULT_ADMINS`.
+- [Configuration](https://xolo-gateway.org/latest/administration/installation/configuration/): référence des variables d'environnement `XOLO_*`, authentification (OIDC générique, Google, GitHub, Gitea), plugins, stockage SQLite ou PostgreSQL.
+- [Développement de plugins](https://xolo-gateway.org/latest/administration/installation/plugins/): écrire un plugin Go pour Xolo, interface gRPC de `pkg/pluginsdk`, événement émis (`plugin.<nom>.…`).
+- [Hébergement AGPL](https://xolo-gateway.org/latest/administration/hebergement-agpl/): implications de la licence AGPL-3.0 pour l'hébergement en réseau.
+- [Administration de l'organisation](https://xolo-gateway.org/latest/administration/organisation/): vue d'ensemble de la gestion quotidienne d'une organisation.
+- [Membres](https://xolo-gateway.org/latest/administration/organisation/membre/membre/), [Invitations](https://xolo-gateway.org/latest/administration/organisation/invitation/invitation/), [Rôles](https://xolo-gateway.org/latest/administration/organisation/roles/roles/): gérer les comptes, les invitations (ciblées ou ouvertes, avec expiration), les rôles intégrés et personnalisés.
+- [Budgets](https://xolo-gateway.org/latest/administration/organisation/budget/budget/), [Fournisseurs](https://xolo-gateway.org/latest/administration/organisation/fournisseurs/fournisseurs/), [Modèles virtuels](https://xolo-gateway.org/latest/administration/organisation/virtual_model/virtual_model/), [Middlewares](https://xolo-gateway.org/latest/administration/organisation/middleware/middleware/), [Applications](https://xolo-gateway.org/latest/administration/organisation/application/application/), [Paramètres](https://xolo-gateway.org/latest/administration/organisation/parametres/parametre/): configuration fine des entités d'une organisation.
+- [API de provisioning](https://xolo-gateway.org/latest/administration/provisioning/provisioning/): piloter tenants, organisations, membres et rôles depuis un système externe (Terraform, Ansible, Kubernetes…) via TLS mutuel ; endpoints, invariants, mise en place d'une PKI de développement.
+
+## Utilisation
+
+- [Tableau de bord](https://xolo-gateway.org/latest/utilisation/dashboard/dashboard/): visualiser l'activité — requêtes, tokens, coûts, énergie, CO₂ — sur la période choisie.
+- [Événements](https://xolo-gateway.org/latest/utilisation/evenements/evenement/): explorateur d'événements en `eventql`, règles d'alerte (portée `org` ou `personal`), catalogue des événements et attributs.
+- [Tutoriel : un agent support gardé](https://xolo-gateway.org/latest/utilisation/tutoriels/agent-garde/agent-garde/): construire pas à pas un pipeline avec cadrage, pseudonymisation, anti-injection et recentrage de la conversation.
+
+## Plugins de pipeline (référence)
+
+Chaque plugin a sa fiche : rôle, ports d'entrée/sortie, configuration, exemples d'usage. L'ordre suit le flux d'une requête : on analyse d'abord, on décide, on transforme, on branche les outils. Le [tutoriel de l'agent support gardé](https://xolo-gateway.org/latest/utilisation/tutoriels/agent-garde/agent-garde/) en assemble plusieurs.
+
+### Analyse de la requête
+
+Plugins qui lisent la requête et produisent des mesures (sans la modifier) ; leurs sorties alimentent les plugins de décision ou les nœuds intégrés (`compare`, `select`, `math`).
+
+- [request-inspector](https://xolo-gateway.org/latest/concepts/noeuds-pipeline/plugins/request-inspector/) — structure de la requête (images, raisonnement, outils, taille du contexte).
+- [complexity-scorer](https://xolo-gateway.org/latest/concepts/noeuds-pipeline/plugins/complexity-scorer/) — score de complexité lexicale et structurelle.
+- [text-classifier](https://xolo-gateway.org/latest/concepts/noeuds-pipeline/plugins/text-classifier/) — classification thématique par règles lexicales et bayésien embarqué, sans appel LLM.
+- [llm-classifier](https://xolo-gateway.org/latest/concepts/noeuds-pipeline/plugins/llm-classifier/) — classification via un modèle de l'organisation.
+- [prompt-guard](https://xolo-gateway.org/latest/concepts/noeuds-pipeline/plugins/prompt-guard/) — risque d'injection, pression accumulée, inspection des outils et de la réponse, canaris.
+- [energy-estimator](https://xolo-gateway.org/latest/concepts/noeuds-pipeline/plugins/energy-estimator/) — estimation d'énergie à partir des tokens et de la taille du modèle.
+- [budget-pressure](https://xolo-gateway.org/latest/concepts/noeuds-pipeline/plugins/budget-pressure/) — part du budget déjà consommée par l'utilisateur.
+
+### Décision
+
+Plugins qui transforment des mesures en décision quand les nœuds intégrés `compare` et `select` ne suffisent plus.
+
+- [fuzzy-evaluator](https://xolo-gateway.org/latest/concepts/noeuds-pipeline/plugins/fuzzy-evaluator/) — règles de logique floue sur des valeurs numériques.
+- [script-processor](https://xolo-gateway.org/latest/concepts/noeuds-pipeline/plugins/script-processor/) — exécution de scripts Tengo avec ports personnalisés.
+
+### Transformation de la requête
+
+Plugins qui modifient la requête ou la réponse (pré-requête, post-réponse, outils).
+
+- [system-prompt](https://xolo-gateway.org/latest/concepts/noeuds-pipeline/plugins/system-prompt/) — injecte ou remplace le prompt système.
+- [pseudonymizer](https://xolo-gateway.org/latest/concepts/noeuds-pipeline/plugins/pseudonymizer/) — anonymisation des données personnelles avant l'appel, restauration après (stratégies `replace`, `hash` ; mode `fail-closed`).
+- [time-restriction](https://xolo-gateway.org/latest/concepts/noeuds-pipeline/plugins/time-restriction/) — restriction horaire avec fuseau configurable.
+
+### Outils et test
+
+Plugins d'intégration et mocks pour le développement ou la composition avec l'écosystème.
+
+- [mcp-bridge](https://xolo-gateway.org/latest/concepts/noeuds-pipeline/plugins/mcp-bridge/) — pont vers des serveurs MCP et exposition de leurs outils au modèle.
+- [dummy-model](https://xolo-gateway.org/latest/concepts/noeuds-pipeline/plugins/dummy-model/) — réponses synthétiques pour tester un modèle virtuel sans appel réel.
+
+## Le projet
+
+- [Communauté](https://xolo-gateway.org/latest/projet/communaute/): canal Matrix `#xolo:matrix.org`, dépôt GitHub, page « Trouver un expert ».
+- [Contribuer](https://xolo-gateway.org/latest/projet/contribuer/): guide de contribution, DCO, processus de revue.
+- [Gouvernance](https://xolo-gateway.org/latest/projet/gouvernance/): rôles (utilisateur, contributeur, committer, mainteneur, mainteneur principal), prise de décision par consensus tacite, RFC, engagement de licence AGPL-3.0.
+- [Sécurité](https://xolo-gateway.org/latest/projet/securite/): signalement privé des vulnérabilités, divulgation coordonnée.
+- [Marque](https://xolo-gateway.org/latest/projet/marque/): règles d'usage du nom et du logo Xolo.
+
+## Optional
+
+- [Code source sur GitHub](https://github.com/xolo-gateway/xolo): dépôt principal, README, `pkg/pluginsdk`, exemples.
+- [Image Docker](https://ghcr.io/xolo-gateway/xolo-server): tags sémantiques (`vX.Y.Z`) et `latest` de `xolo-server`.
+- [Trouver un expert](https://xolo-gateway.org/latest/experts/): entreprises qui accompagnent sur Xolo (installation, hébergement, formation, plugins). Le projet les référence sans les mandater.
+- [Annuaire llms.txt](https://llmstxt.site/): autres sites publiant un fichier `llms.txt`.

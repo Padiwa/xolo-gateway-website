@@ -75,6 +75,37 @@ make versions DOC_LANG=en
 make delete DOC_LANG=en VERSION=0.55.0 PUSH=true
 ```
 
+## llms.txt
+
+Un fichier `llms.txt` est publié aux côtés de chaque version de la
+documentation (`/X.Y.Z/llms.txt`, `/main/llms.txt`, et leurs équivalents
+`/en/…`, `/es/…`) pour servir de point d'entrée aux agents LLM qui
+consultent la documentation. Le format suit la [proposition
+llmstxt.org](https://llmstxt.org/) (v2) : un titre, un résumé, des sections
+avec liens vers les pages détaillées.
+
+Les sources vivent dans `overrides/llms/<lang>/llms.txt`, versionnées dans
+ce dépôt — elles ne sont pas régénérées depuis `xolo-gateway/xolo`, ce qui
+permet de garder une version stable des pointeurs quand la structure de la
+documentation évolue, et d'adapter chaque fichier à la couverture réelle de
+chaque langue (FR complète, EN/ES partielles).
+
+La commande `make copy-llms-txt` les pose à la racine de chaque
+`site/<lang>/` après le build ; les workflows `publish-version.yml` et
+`publish-main.yml` l'appellent entre `check-all` et `mike deploy`, pour que
+`gh-pages` reçoive `llms.txt` avec le reste.
+
+Pour ajouter ou modifier un fichier :
+
+```bash
+$EDITOR overrides/llms/fr/llms.txt
+make prepare                                  # régénère content/<lang>/
+make check-all                                # construit site/<lang>/
+make copy-llms-txt                            # pose llms.txt
+make serve DOC_LANG=fr                        # vérifie le rendu à /
+                                             # localhost:8000/llms.txt
+```
+
 ## Trouver un expert
 
 La page « Trouver un expert » liste les entreprises qui accompagnent Xolo. Les
